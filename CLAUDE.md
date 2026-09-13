@@ -129,6 +129,10 @@ auto-scroll-save/
      자동 생성됨. 콜백에서 `chrome.runtime.lastError`를 확인해 실패한
      리소스는 콘솔에 경고 로그만 남기고 건너뛴다 (전체 프로세스를
      중단시키지 않음)
+   - **Referer 헤더 지정**: 이미지 서버가 Referer를 검사하는 핫링크 방지를
+     쓰는 경우 `SERVER_FORBIDDEN`으로 실패할 수 있다. `chrome.downloads.download`의
+     `headers: [{ name: 'Referer', value: tab.url }]`로 원본 페이지 URL을
+     Referer로 명시해서 보낸다.
    - **콜백만으로는 부족함**: `chrome.downloads.download`의 콜백은 다운로드가
      "큐잉"됐다는 뜻일 뿐 실제 파일 완성을 보장하지 않는다 (크롬이 자동
      다운로드를 조용히 막는 경우 콜백은 정상 downloadId를 반환하고 상태만

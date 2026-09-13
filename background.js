@@ -92,9 +92,17 @@ function waitForDownloadFinish(downloadId, timeoutMs = 15000) {
 // 넘긴다. fetch()는 CORS 정책의 적용을 받아 <img> 태그로는 멀쩡히 보이는 이미지도
 // 다운로드에 실패하는 경우가 많은데, chrome.downloads.download는 일반 브라우저
 // 다운로드와 동일하게 동작해 CORS 제약을 받지 않는다.
-function downloadResource(url, filename) {
+//
+// 다만 이미지 서버가 Referer를 검사하는 핫링크 방지(hotlink protection)를 쓰는
+// 경우 SERVER_FORBIDDEN으로 실패할 수 있다 — 원본 페이지에서 보는 것처럼
+// Referer 헤더를 원본 페이지 URL로 명시해서 보낸다.
+function downloadResource(url, filename, referer) {
+  const options = { url, filename, saveAs: false };
+  if (referer) {
+    options.headers = [{ name: 'Referer', value: referer }];
+  }
   return new Promise((resolve) => {
-    chrome.downloads.download({ url, filename, saveAs: false }, async (downloadId) => {
+    chrome.downloads.download(options, async (downloadId) => {
       if (chrome.runtime.lastError || downloadId === undefined) {
         const message = chrome.runtime.lastError ? chrome.runtime.lastError.message : 'downloadId 없음';
         console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`, message);
@@ -170,7 +178,7 @@ async function handleCapture(tab) {
 
     const downloadResults = [];
     for (const { url, localFilename } of resources) {
-      const res = await downloadResource(url, `${safeTitle}_files/${localFilename}`);
+      const res = await downloadResource(url, `${safeTitle}_files/${localFilename}`, tab.url);
       downloadResults.push(res);
     }
 
