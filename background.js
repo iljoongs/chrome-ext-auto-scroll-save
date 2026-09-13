@@ -14,14 +14,20 @@ async function scrollAndWaitForImages(
   imageWaitMaxMs,
   maxIterations
 ) {
-  let lastHeight = -1;
+  let lastScrollY = -1;
   for (let i = 0; i < maxIterations; i++) {
     window.scrollBy(0, scrollStepPx);
     await new Promise((resolve) => setTimeout(resolve, scrollIntervalMs));
+
     const scrollHeight = document.body.scrollHeight;
     const reachedBottom = window.scrollY + window.innerHeight >= scrollHeight;
-    if (reachedBottom || scrollHeight === lastHeight) break;
-    lastHeight = scrollHeight;
+    if (reachedBottom) break;
+
+    // scrollHeight는 대부분의 페이지에서 스크롤해도 거의 그대로이므로(스크롤 위치만
+    // 바뀜), 진행 여부는 scrollY 변화로 판단해야 한다. scrollY도 안 움직이면
+    // 더 스크롤할 수 없는 상태(막힘)로 보고 중단한다.
+    if (window.scrollY === lastScrollY) break;
+    lastScrollY = window.scrollY;
   }
 
   const start = Date.now();
