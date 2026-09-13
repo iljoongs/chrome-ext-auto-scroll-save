@@ -67,6 +67,10 @@ auto-scroll-save/
 
 1. **리소스 URL 수집** — 아래 항목들을 순회하며 절대 URL 목록을 만든다.
    - `img[src]` (및 `srcset`이 있다면 그 중 대표 1개 URL도 포함)
+   - `<picture>` 안의 `<source srcset>` 대표 1개 URL (재작성 시 `<source>`는
+     제거하고 항상 함께 있는 `<img>` 폴백만 로컬 경로로 남긴다 — 포맷/해상도별
+     후보를 전부 재현하지는 않는 1차 버전의 범위)
+   - `<video poster>`
    - 인라인 `style` 속성 또는 `<style>` 태그 내 `background-image: url(...)`
    - `<link rel="stylesheet">`의 `href`
    - 각 스타일시트 내부의 `url(...)` 참조 (`document.styleSheets`의 `cssRules`를

@@ -87,6 +87,21 @@
     }
   });
 
+  // 1-1. <picture> 안의 <source srcset> 대표 1개 (반응형/최신 포맷 이미지에서
+  // 실제로는 <source>가 선택되고 <img>는 폴백으로만 쓰이는 경우가 흔함)
+  document.querySelectorAll('picture source[srcset]').forEach((source) => {
+    const srcset = source.getAttribute('srcset');
+    if (srcset) {
+      const first = srcset.split(',')[0].trim().split(/\s+/)[0];
+      if (first) registerResource(first);
+    }
+  });
+
+  // 1-2. <video poster>
+  document.querySelectorAll('video[poster]').forEach((video) => {
+    registerResource(video.getAttribute('poster'));
+  });
+
   // 2. 인라인 style 속성 (background-image 등)
   document.querySelectorAll('[style]').forEach((el) => {
     collectUrlsFromCssText(el.getAttribute('style') || '').forEach(registerResource);
@@ -132,6 +147,19 @@
     }
     if (img.hasAttribute('srcset')) {
       img.removeAttribute('srcset');
+    }
+  });
+
+  // <picture><source>는 포맷/해상도별 후보라 완전히 재현하기 어려우므로 제거하고,
+  // 항상 함께 있는 <img> 폴백(바로 위에서 로컬 경로로 치환됨)만 쓰게 한다.
+  clone.querySelectorAll('picture source').forEach((source) => {
+    source.remove();
+  });
+
+  clone.querySelectorAll('video[poster]').forEach((video) => {
+    const abs = toAbsoluteUrl(video.getAttribute('poster'));
+    if (abs && resourceMap.has(abs)) {
+      video.setAttribute('poster', resourceMap.get(abs));
     }
   });
 
