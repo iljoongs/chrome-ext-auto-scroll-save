@@ -34,8 +34,10 @@ auto-scroll-save/
 ### manifest.json
 - `manifest_version: 3`
 - 이름/설명: 한국어로 작성 (예: "자동 스크롤 후 페이지 저장")
-- `permissions`: `["activeTab", "scripting", "downloads"]`
-  (MHTML 방식을 쓰지 않으므로 `pageCapture` 권한은 더 이상 필요 없음)
+- `permissions`: `["activeTab", "scripting", "downloads", "declarativeNetRequest"]`
+  (MHTML 방식을 쓰지 않으므로 `pageCapture` 권한은 더 이상 필요 없음;
+  `declarativeNetRequest`는 핫링크 방지 사이트를 위한 Referer 헤더 오버라이드용
+  — 아래 D의 "Referer 헤더 지정" 참고)
 - `host_permissions`: `["<all_urls>"]`
   (리소스 파일을 `fetch`로 받아오려면 대상 사이트에 대한 호스트 권한 필요)
 - `action`: 기본 아이콘 클릭 시 동작 (별도 popup 없이 `chrome.action.onClicked` 사용)
@@ -131,8 +133,13 @@ auto-scroll-save/
      중단시키지 않음)
    - **Referer 헤더 지정**: 이미지 서버가 Referer를 검사하는 핫링크 방지를
      쓰는 경우 `SERVER_FORBIDDEN`으로 실패할 수 있다. `chrome.downloads.download`의
-     `headers: [{ name: 'Referer', value: tab.url }]`로 원본 페이지 URL을
-     Referer로 명시해서 보낸다.
+     `headers` 옵션으로 `Referer`를 직접 지정하는 것은 **불가능**하다 —
+     시도하면 `Unsafe request header name` 에러가 나며 해당 다운로드 자체가
+     실패한다 (Referer는 fetch/XHR와 마찬가지로 스크립트가 직접 못 바꾸는
+     안전하지 않은 헤더로 취급됨). 대신 `declarativeNetRequest`의 세션
+     동적 규칙(`updateSessionRules`, `action.type: "modifyHeaders"`)으로
+     리소스 origin별로 Referer를 원본 페이지 URL로 덮어쓰는 규칙을 다운로드
+     직전에 등록하고, 끝나면 제거한다 (`withRefererOverride` 함수).
    - **콜백만으로는 부족함**: `chrome.downloads.download`의 콜백은 다운로드가
      "큐잉"됐다는 뜻일 뿐 실제 파일 완성을 보장하지 않는다 (크롬이 자동
      다운로드를 조용히 막는 경우 콜백은 정상 downloadId를 반환하고 상태만

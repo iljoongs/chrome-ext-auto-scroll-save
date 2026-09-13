@@ -93,14 +93,14 @@ function waitForDownloadFinish(downloadId, timeoutMs = 15000) {
 // 다운로드에 실패하는 경우가 많은데, chrome.downloads.download는 일반 브라우저
 // 다운로드와 동일하게 동작해 CORS 제약을 받지 않는다.
 //
-// 다만 이미지 서버가 Referer를 검사하는 핫링크 방지(hotlink protection)를 쓰는
-// 경우 SERVER_FORBIDDEN으로 실패할 수 있다 — 원본 페이지에서 보는 것처럼
-// Referer 헤더를 원본 페이지 URL로 명시해서 보낸다.
-function downloadResource(url, filename, referer) {
+// 참고: 이미지 서버가 Referer를 검사하는 핫링크 방지를 쓰는 경우
+// SERVER_FORBIDDEN으로 실패할 수 있는데, `headers` 옵션으로 Referer를 직접
+// 설정하는 건 불가능하다 ("Unsafe request header name" 에러 — Referer는
+// fetch/XHR와 마찬가지로 크롬이 스크립트가 직접 못 바꾸게 막아둔 헤더).
+// 대신 declarativeNetRequest로 네트워크 계층에서 Referer를 덮어쓴다
+// (아래 withRefererOverride 참고).
+function downloadResource(url, filename) {
   const options = { url, filename, saveAs: false };
-  if (referer) {
-    options.headers = [{ name: 'Referer', value: referer }];
-  }
   return new Promise((resolve) => {
     chrome.downloads.download(options, async (downloadId) => {
       if (chrome.runtime.lastError || downloadId === undefined) {
@@ -116,6 +116,61 @@ function downloadResource(url, filename, referer) {
       resolve({ url, filename, ok: state === 'complete', detail: reason || state });
     });
   });
+}
+
+// 세션 전용 declarativeNetRequest 동적 규칙에 쓸 ID (다른 규칙과 안 겹치게
+// 이 확장만 쓰는 임의의 큰 값을 기준으로 사용)
+const REFERER_RULE_ID_BASE = 8700001;
+
+// resources의 각 origin(호스트)으로 나가는 요청의 Referer 헤더를 원본 페이지
+// URL로 덮어쓰는 세션 규칙을 등록한 뒤 fn을 실행하고, 끝나면 규칙을 정리한다.
+// (다운로드는 chrome.downloads.download의 headers 옵션으로 Referer를 직접
+// 지정할 수 없으므로, 네트워크 계층에서 declarativeNetRequest로 덮어쓴다.)
+async function withRefererOverride(tabUrl, urls, fn) {
+  const origins = Array.from(
+    new Set(
+      urls
+        .map((u) => {
+          try {
+            return new URL(u).origin;
+          } catch (e) {
+            return null;
+          }
+        })
+        .filter(Boolean)
+    )
+  );
+
+  const rules = origins.map((origin, i) => ({
+    id: REFERER_RULE_ID_BASE + i,
+    priority: 1,
+    action: {
+      type: 'modifyHeaders',
+      requestHeaders: [{ header: 'Referer', operation: 'set', value: tabUrl }],
+    },
+    condition: { urlFilter: `||${new URL(origin).hostname}^` },
+  }));
+  const ruleIds = rules.map((r) => r.id);
+
+  if (rules.length > 0) {
+    try {
+      await chrome.declarativeNetRequest.updateSessionRules({ addRules: rules, removeRuleIds: ruleIds });
+    } catch (err) {
+      console.warn('[자동 스크롤 후 페이지 저장] Referer 오버라이드 규칙 등록 실패:', err);
+    }
+  }
+
+  try {
+    return await fn();
+  } finally {
+    if (rules.length > 0) {
+      try {
+        await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ruleIds });
+      } catch (err) {
+        console.warn('[자동 스크롤 후 페이지 저장] Referer 오버라이드 규칙 정리 실패:', err);
+      }
+    }
+  }
 }
 
 // MV3 서비스 워커는 ~30초간 활동이 없으면 크롬이 중간에 강제 종료시킨다.
@@ -177,10 +232,16 @@ async function handleCapture(tab) {
     });
 
     const downloadResults = [];
-    for (const { url, localFilename } of resources) {
-      const res = await downloadResource(url, `${safeTitle}_files/${localFilename}`, tab.url);
-      downloadResults.push(res);
-    }
+    await withRefererOverride(
+      tab.url,
+      resources.map((r) => r.url),
+      async () => {
+        for (const { url, localFilename } of resources) {
+          const res = await downloadResource(url, `${safeTitle}_files/${localFilename}`);
+          downloadResults.push(res);
+        }
+      }
+    );
 
     // 리소스별 실제 다운로드 결과(성공/실패 사유)를 별도 파일로 남긴다 —
     // chrome.downloads.download 콜백만으로는 "큐잉 성공"과 "실제 파일 완성"을
