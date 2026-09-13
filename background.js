@@ -74,9 +74,20 @@ function downloadResource(url, filename) {
   });
 }
 
+// MV3 서비스 워커는 ~30초간 활동이 없으면 크롬이 중간에 강제 종료시킨다.
+// 스크롤+대기+리소스 순차 다운로드를 합치면 이 시간을 쉽게 넘기므로, 작업이
+// 끝날 때까지 주기적으로 가벼운 크롬 API를 호출해 서비스 워커를 깨어있게 한다.
+function startKeepAlive() {
+  const id = setInterval(() => {
+    chrome.runtime.getPlatformInfo(() => {});
+  }, 20000);
+  return () => clearInterval(id);
+}
+
 async function handleCapture(tab) {
   if (!tab || !tab.id) return;
   const tabId = tab.id;
+  const stopKeepAlive = startKeepAlive();
 
   try {
     await chrome.action.setBadgeText({ tabId, text: '...' });
@@ -115,6 +126,8 @@ async function handleCapture(tab) {
   } catch (err) {
     console.error('[자동 스크롤 후 페이지 저장] 실패:', err);
     await chrome.action.setBadgeText({ tabId, text: 'X' });
+  } finally {
+    stopKeepAlive();
   }
 }
 

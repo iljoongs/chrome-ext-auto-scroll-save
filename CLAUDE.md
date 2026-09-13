@@ -46,6 +46,11 @@ auto-scroll-save/
 **A. 트리거**
 - `chrome.action.onClicked` 리스너에서 시작. 클릭된 탭(`tab`)을 대상으로 동작.
 - 진행 표시: `chrome.action.setBadgeText({tabId, text: "..."})`.
+- **서비스 워커 keepalive**: MV3 서비스 워커는 ~30초간 활동이 없으면 크롬이
+  중간에 강제 종료시키는데, 스크롤+대기+리소스 순차 다운로드를 합치면 이
+  시간을 쉽게 넘는다. 캡처 시작부터 끝(성공/실패 무관)까지
+  `setInterval`로 20초마다 가벼운 크롬 API(`chrome.runtime.getPlatformInfo`)를
+  호출해 서비스 워커가 도중에 죽지 않도록 한다.
 
 **B. 자동 스크롤 + 이미지 로딩 대기** (기존과 동일, 변경 없음)
 - `chrome.scripting.executeScript`로 페이지 컨텍스트에 스크롤 함수 주입
