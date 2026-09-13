@@ -67,6 +67,15 @@ auto-scroll-save/
 
 1. **리소스 URL 수집** — 아래 항목들을 순회하며 절대 URL 목록을 만든다.
    - `img[src]` (및 `srcset`이 있다면 그 중 대표 1개 URL도 포함)
+   - **지연 로딩 속성 우선**: `img`에 `data-src`/`data-original`/`data-lazy-src`/
+     `data-lazy`(및 `srcset` 대신 `data-srcset`/`data-lazy-srcset`)가 있으면
+     `src`(보통 가짜 placeholder, 예: `sprite.png`)가 아니라 이 속성의 값을
+     실제 URL로 사용한다. (결정 배경: 일부 사이트는 스크래핑 방지를 위해
+     `src`에 항상 placeholder를 두고 실제 URL은 `data-src`에만 넣어두는데,
+     이런 사이트는 자동 스크롤로 실제 로딩 스왑이 안 일어나는 경우가 있어
+     `data-src`가 있으면 스크롤/로딩 상태와 무관하게 그 값을 바로 읽는다.)
+     재작성 시 이 지연 로딩 속성들과 `srcset`은 모두 제거하고 `src`만
+     로컬 경로로 남긴다.
    - `<picture>` 안의 `<source srcset>` 대표 1개 URL (재작성 시 `<source>`는
      제거하고 항상 함께 있는 `<img>` 폴백만 로컬 경로로 남긴다 — 포맷/해상도별
      후보를 전부 재현하지는 않는 1차 버전의 범위)

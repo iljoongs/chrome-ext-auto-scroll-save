@@ -77,14 +77,28 @@
     });
   }
 
-  // 1. img[src] (+ srcset 대표 1개)
-  document.querySelectorAll('img[src]').forEach((img) => {
-    registerResource(img.getAttribute('src'));
-    const srcset = img.getAttribute('srcset');
-    if (srcset) {
-      const first = srcset.split(',')[0].trim().split(/\s+/)[0];
-      if (first) registerResource(first);
-    }
+  // 지연 로딩 라이브러리들이 실제 URL을 담아두는 흔한 속성 이름들.
+  // 이 값이 있으면 src는 보통 가짜 placeholder(예: sprite.png, 1x1 gif)이므로
+  // 스크롤로 스왑되길 기다리지 않고 이 속성에서 바로 진짜 URL을 읽는다.
+  const LAZY_SRC_ATTRS = ['data-src', 'data-original', 'data-lazy-src', 'data-lazy'];
+  const LAZY_SRCSET_ATTRS = ['data-srcset', 'data-lazy-srcset'];
+
+  function pickFirstSrcsetUrl(srcset) {
+    if (!srcset) return null;
+    const first = srcset.split(',')[0].trim().split(/\s+/)[0];
+    return first || null;
+  }
+
+  // 1. img (+ 지연 로딩 속성 + srcset 대표 1개)
+  document.querySelectorAll('img').forEach((img) => {
+    const lazyAttr = LAZY_SRC_ATTRS.find((attr) => img.hasAttribute(attr));
+    const realSrc = lazyAttr ? img.getAttribute(lazyAttr) : img.getAttribute('src');
+    if (realSrc) registerResource(realSrc);
+
+    const lazySrcsetAttr = LAZY_SRCSET_ATTRS.find((attr) => img.hasAttribute(attr));
+    const srcset = lazySrcsetAttr ? img.getAttribute(lazySrcsetAttr) : img.getAttribute('srcset');
+    const firstFromSrcset = pickFirstSrcsetUrl(srcset);
+    if (firstFromSrcset) registerResource(firstFromSrcset);
   });
 
   // 1-1. <picture> 안의 <source srcset> 대표 1개 (반응형/최신 포맷 이미지에서
@@ -140,11 +154,15 @@
   // --- HTML 재작성: 실제 DOM은 건드리지 않고 복제본 위에서만 치환 ---
   const clone = document.documentElement.cloneNode(true);
 
-  clone.querySelectorAll('img[src]').forEach((img) => {
-    const abs = toAbsoluteUrl(img.getAttribute('src'));
+  clone.querySelectorAll('img').forEach((img) => {
+    const lazyAttr = LAZY_SRC_ATTRS.find((attr) => img.hasAttribute(attr));
+    const realSrc = lazyAttr ? img.getAttribute(lazyAttr) : img.getAttribute('src');
+    const abs = toAbsoluteUrl(realSrc);
     if (abs && resourceMap.has(abs)) {
       img.setAttribute('src', resourceMap.get(abs));
     }
+    LAZY_SRC_ATTRS.forEach((attr) => img.removeAttribute(attr));
+    LAZY_SRCSET_ATTRS.forEach((attr) => img.removeAttribute(attr));
     if (img.hasAttribute('srcset')) {
       img.removeAttribute('srcset');
     }
