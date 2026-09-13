@@ -195,7 +195,47 @@ auto-scroll-save/
 
 5. 완료/실패 시 배지 텍스트 초기화 또는 실패 표시("X")
 
-**E. 에러 처리**
+**E. "다음화" 자동 이동 (여러 화 연속 저장)**
+
+아이콘 클릭 시 한 페이지만 저장하지 않고, "다음화" 링크를 계속 따라가며
+매 화를 스크롤+캡처+저장한 뒤, 다음화가 비활성화된 마지막 화에서 멈춘다.
+(대상 사이트: `wfwf497.com` 계열 뷰어. 페이지 구조: `<a class="vnav-btn"
+href="/view?toon=...&num=N">`가 이전화/다음화 두 개 있고, href의 `num`
+쿼리 파라미터로 현재 화보다 큰 값이 "다음화"다. 마지막 화에서는 다음화
+자리가 `<button class="vnav-btn disabled" disabled>`로 바뀌어 `<a>` 자체가
+없어진다 — 이걸로 "끝"을 판별한다.)
+
+1. `findNextEpisodeUrl()` (페이지 컨텍스트에 주입): 현재 URL의 `num`보다
+   큰 `num`을 가리키는 `a.vnav-btn[href]` 중 가장 작은 값을 "다음화" URL로
+   반환한다. 해당하는 `<a>`가 없으면(마지막 화) `null`을 반환한다.
+2. `handleCaptureAllChapters(tab)`가 오케스트레이션의 최상위 진입점이 된다
+   (기존 `handleCapture`는 한 화만 처리하는 `captureCurrentPage(tab)`로
+   이름을 바꾸고 내부 로직으로 남긴다):
+   - 반복(`chapterCount`를 배지에 표시, 최대 `MAX_CHAPTERS`회 — 다음화
+     링크가 순환하는 등의 이상 상황에 대비한 안전장치):
+     a. `captureCurrentPage(tab)`로 현재 화 저장
+     b. `findNextEpisodeUrl()`을 페이지에 주입해 다음화 URL 조회
+     c. 없으면(`null`) 반복 종료
+     d. 있으면 `chrome.tabs.update(tabId, { url })`로 이동시키고,
+        `chrome.tabs.onUpdated`의 `status: 'complete'`까지 기다린 뒤
+        (경쟁 상태 방지를 위해 리스너를 `tabs.update` 호출 **전에** 등록),
+        페이지 자체 초기화 스크립트가 끝나도록 짧게(500ms) 더 대기하고
+        `chrome.tabs.get`으로 갱신된 `tab`(제목 등)을 다시 읽는다
+3. 한 화가 실패하면(`captureCurrentPage`가 예외를 던지면) 전체를 멈추고
+   배지에 "X" 표시 — 중간에 실패한 채로 계속 다음 화로 넘어가 사용자가
+   못 알아채는 것을 방지
+4. **중단**: `runningTabs`(탭ID → `{ stopRequested }`)로 진행 중인 탭을
+   추적한다. 진행 중에 아이콘을 다시 클릭하면 새로 시작하지 않고
+   `stopRequested`만 `true`로 바꾼다. 루프는 각 화 저장이 끝난 시점(다음
+   화로 넘어가기 직전)에 이 플래그를 확인해서 멈춘다 — 파일을 받다가
+   중간에 끊어서 절반만 저장되는 것을 피하기 위해, 진행 중인 한 화의
+   다운로드 자체를 즉시 취소하지는 않는다.
+
+## 참고: 이 "다음화" 자동 이동 기능은 `wfwf497.com` 계열 사이트의 특정 DOM
+구조(`vnav-btn`, `num` 쿼리 파라미터)에 맞춰져 있다. 다른 사이트에 적용하려면
+`findNextEpisodeUrl()`의 선택자/판별 로직을 그 사이트에 맞게 조정해야 한다.
+
+**F. 에러 처리**
 - 각 단계(스크립트 주입 실패, 개별 리소스 fetch 실패, 다운로드 실패)를
   구분해서 콘솔에 로그 남길 것
 - 개별 리소스 실패는 전체를 중단하지 않고 "일부 리소스 누락"으로 계속 진행
