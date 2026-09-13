@@ -93,83 +93,113 @@ function waitForDownloadFinish(downloadId, timeoutMs = 15000) {
 // 다운로드에 실패하는 경우가 많은데, chrome.downloads.download는 일반 브라우저
 // 다운로드와 동일하게 동작해 CORS 제약을 받지 않는다.
 //
-// 참고: 이미지 서버가 Referer를 검사하는 핫링크 방지를 쓰는 경우
-// SERVER_FORBIDDEN으로 실패할 수 있는데, `headers` 옵션으로 Referer를 직접
-// 설정하는 건 불가능하다 ("Unsafe request header name" 에러 — Referer는
-// fetch/XHR와 마찬가지로 크롬이 스크립트가 직접 못 바꾸게 막아둔 헤더).
-// 대신 declarativeNetRequest로 네트워크 계층에서 Referer를 덮어쓴다
-// (아래 withRefererOverride 참고).
-function downloadResource(url, filename) {
-  const options = { url, filename, saveAs: false };
+// (다운로드가 안 되는 경우는 아래 fetchResourceViaDebugger 참고)
+// downloadUrl은 실제로 다운로드에 쓸 URL(원본 URL 또는 디버거로 미리 받아온
+// 데이터의 data: URL)이고, sourceUrl은 로그/결과 표시에 쓸 원본 URL이다.
+function downloadResource(sourceUrl, downloadUrl, filename) {
+  const options = { url: downloadUrl, filename, saveAs: false };
   return new Promise((resolve) => {
     chrome.downloads.download(options, async (downloadId) => {
       if (chrome.runtime.lastError || downloadId === undefined) {
         const message = chrome.runtime.lastError ? chrome.runtime.lastError.message : 'downloadId 없음';
-        console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`, message);
-        resolve({ url, filename, ok: false, detail: message });
+        console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${sourceUrl}`, message);
+        resolve({ url: sourceUrl, filename, ok: false, detail: message });
         return;
       }
       const { state, reason } = await waitForDownloadFinish(downloadId);
       if (state !== 'complete') {
-        console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`, state, reason);
+        console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${sourceUrl}`, state, reason);
       }
-      resolve({ url, filename, ok: state === 'complete', detail: reason || state });
+      resolve({ url: sourceUrl, filename, ok: state === 'complete', detail: reason || state });
     });
   });
 }
 
-// 세션 전용 declarativeNetRequest 동적 규칙에 쓸 ID (다른 규칙과 안 겹치게
-// 이 확장만 쓰는 임의의 큰 값을 기준으로 사용)
-const REFERER_RULE_ID_BASE = 8700001;
+function sendDebuggerCommand(tabId, method, params) {
+  return new Promise((resolve, reject) => {
+    chrome.debugger.sendCommand({ tabId }, method, params || {}, (result) => {
+      if (chrome.runtime.lastError) {
+        reject(new Error(chrome.runtime.lastError.message));
+        return;
+      }
+      resolve(result);
+    });
+  });
+}
 
-// resources의 각 origin(호스트)으로 나가는 요청의 Referer 헤더를 원본 페이지
-// URL로 덮어쓰는 세션 규칙을 등록한 뒤 fn을 실행하고, 끝나면 규칙을 정리한다.
-// (다운로드는 chrome.downloads.download의 headers 옵션으로 Referer를 직접
-// 지정할 수 없으므로, 네트워크 계층에서 declarativeNetRequest로 덮어쓴다.)
-async function withRefererOverride(tabUrl, urls, fn) {
-  const origins = Array.from(
-    new Set(
-      urls
-        .map((u) => {
-          try {
-            return new URL(u).origin;
-          } catch (e) {
-            return null;
-          }
-        })
-        .filter(Boolean)
-    )
-  );
+// chrome.downloads.download는 Referer를 직접 설정할 수 없고(안전하지 않은
+// 헤더로 취급됨), declarativeNetRequest도 chrome.downloads.download가 만드는
+// 요청에는 개입하지 못한다(실측 확인됨). 그래서 Referer/쿠키 검사가 있는
+// 핫링크 방지 리소스는 CDP(Network.loadNetworkResource)로 "그 프레임이 직접
+// 요청한 것"처럼 가져온다 — 이러면 실제 페이지 요청과 동일하게 Referer/쿠키가
+// 붙고, CORS도 적용되지 않는다(디버깅 프로토콜은 페이지 스크립트가 아니라
+// 브라우저 쪽 권한으로 응답을 읽기 때문).
+async function fetchResourceViaDebugger(tabId, frameId, url) {
+  const { resource } = await sendDebuggerCommand(tabId, 'Network.loadNetworkResource', {
+    frameId,
+    url,
+    options: { disableCache: false, includeCredentials: true },
+  });
 
-  const rules = origins.map((origin, i) => ({
-    id: REFERER_RULE_ID_BASE + i,
-    priority: 1,
-    action: {
-      type: 'modifyHeaders',
-      requestHeaders: [{ header: 'Referer', operation: 'set', value: tabUrl }],
-    },
-    condition: { urlFilter: `||${new URL(origin).hostname}^` },
-  }));
-  const ruleIds = rules.map((r) => r.id);
-
-  if (rules.length > 0) {
-    try {
-      await chrome.declarativeNetRequest.updateSessionRules({ addRules: rules, removeRuleIds: ruleIds });
-    } catch (err) {
-      console.warn('[자동 스크롤 후 페이지 저장] Referer 오버라이드 규칙 등록 실패:', err);
-    }
+  if (!resource || !resource.success) {
+    return { ok: false, detail: `CDP_LOAD_FAILED(${resource ? resource.httpStatusCode : 'n/a'})` };
+  }
+  if (!resource.stream) {
+    return { ok: false, detail: 'CDP_NO_STREAM' };
   }
 
-  try {
-    return await fn();
-  } finally {
-    if (rules.length > 0) {
-      try {
-        await chrome.declarativeNetRequest.updateSessionRules({ removeRuleIds: ruleIds });
-      } catch (err) {
-        console.warn('[자동 스크롤 후 페이지 저장] Referer 오버라이드 규칙 정리 실패:', err);
-      }
+  const chunks = [];
+  let totalLength = 0;
+  for (;;) {
+    const { data, base64Encoded, eof } = await sendDebuggerCommand(tabId, 'IO.read', {
+      handle: resource.stream,
+    });
+    if (data) {
+      const bytes = base64Encoded
+        ? Uint8Array.from(atob(data), (c) => c.charCodeAt(0))
+        : new TextEncoder().encode(data);
+      chunks.push(bytes);
+      totalLength += bytes.length;
     }
+    if (eof) break;
+  }
+  await sendDebuggerCommand(tabId, 'IO.close', { handle: resource.stream }).catch(() => {});
+
+  const combined = new Uint8Array(totalLength);
+  let offset = 0;
+  for (const chunk of chunks) {
+    combined.set(chunk, offset);
+    offset += chunk.length;
+  }
+  return { ok: true, bytes: combined };
+}
+
+// 캡처 대상 탭에 디버거를 붙여 CDP로 리소스를 가져올 수 있게 준비한다.
+// 실패(예: 이미 다른 DevTools가 그 탭에 붙어 있음)해도 전체를 중단하지 않고,
+// null을 반환해 호출부가 원래의 직접 다운로드 방식으로 대체하도록 한다.
+async function attachDebuggerForResourceFetch(tabId) {
+  try {
+    await new Promise((resolve, reject) => {
+      chrome.debugger.attach({ tabId }, '1.3', () => {
+        if (chrome.runtime.lastError) {
+          reject(new Error(chrome.runtime.lastError.message));
+        } else {
+          resolve();
+        }
+      });
+    });
+    await sendDebuggerCommand(tabId, 'Network.enable');
+    await sendDebuggerCommand(tabId, 'Page.enable');
+    const frameTree = await sendDebuggerCommand(tabId, 'Page.getFrameTree');
+    return frameTree.frameTree.frame.id;
+  } catch (err) {
+    console.warn('[자동 스크롤 후 페이지 저장] 디버거 연결 실패 (직접 다운로드로 대체):', err.message);
+    try {
+      await chrome.debugger.detach({ tabId });
+    } catch (e) {
+      // 애초에 안 붙었으면 detach도 실패하는데 무시해도 됨
+    }
+    return null;
   }
 }
 
@@ -231,17 +261,39 @@ async function handleCapture(tab) {
       saveAs: false,
     });
 
+    // 디버거를 붙이면 브라우저 상단에 "디버깅 중" 배너가 뜨지만, Referer/쿠키
+    // 검사가 있는 핫링크 방지 리소스까지 받아오려면 이 방법뿐이다. 연결에
+    // 실패하면(예: 이미 다른 DevTools가 붙어 있음) frameId가 null이 되고,
+    // 아래에서 리소스별로 원래의 직접 다운로드 방식으로 대체된다.
+    const frameId = await attachDebuggerForResourceFetch(tabId);
+
     const downloadResults = [];
-    await withRefererOverride(
-      tab.url,
-      resources.map((r) => r.url),
-      async () => {
-        for (const { url, localFilename } of resources) {
-          const res = await downloadResource(url, `${safeTitle}_files/${localFilename}`);
-          downloadResults.push(res);
+    try {
+      for (const { url, localFilename } of resources) {
+        const filename = `${safeTitle}_files/${localFilename}`;
+        let res;
+        if (frameId) {
+          const fetched = await fetchResourceViaDebugger(tabId, frameId, url).catch((err) => ({
+            ok: false,
+            detail: err.message,
+          }));
+          if (fetched.ok) {
+            const base64 = await arrayBufferToBase64(fetched.bytes.buffer);
+            res = await downloadResource(url, `data:application/octet-stream;base64,${base64}`, filename);
+          } else {
+            console.warn(`[자동 스크롤 후 페이지 저장] 리소스 CDP 조회 실패: ${url}`, fetched.detail);
+            res = { url, filename, ok: false, detail: fetched.detail };
+          }
+        } else {
+          res = await downloadResource(url, url, filename);
         }
+        downloadResults.push(res);
       }
-    );
+    } finally {
+      if (frameId) {
+        await chrome.debugger.detach({ tabId }).catch(() => {});
+      }
+    }
 
     // 리소스별 실제 다운로드 결과(성공/실패 사유)를 별도 파일로 남긴다 —
     // chrome.downloads.download 콜백만으로는 "큐잉 성공"과 "실제 파일 완성"을

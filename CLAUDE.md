@@ -34,10 +34,11 @@ auto-scroll-save/
 ### manifest.json
 - `manifest_version: 3`
 - 이름/설명: 한국어로 작성 (예: "자동 스크롤 후 페이지 저장")
-- `permissions`: `["activeTab", "scripting", "downloads", "declarativeNetRequest"]`
+- `permissions`: `["activeTab", "scripting", "downloads", "debugger"]`
   (MHTML 방식을 쓰지 않으므로 `pageCapture` 권한은 더 이상 필요 없음;
-  `declarativeNetRequest`는 핫링크 방지 사이트를 위한 Referer 헤더 오버라이드용
-  — 아래 D의 "Referer 헤더 지정" 참고)
+  `debugger`는 핫링크 방지(Referer/쿠키 검사) 사이트의 리소스를 CDP로
+  가져오기 위함 — 아래 D의 "핫링크 방지 우회" 참고. 이 권한이 붙어있는
+  동안 브라우저에 "디버깅 중" 배너가 뜬다)
 - `host_permissions`: `["<all_urls>"]`
   (리소스 파일을 `fetch`로 받아오려면 대상 사이트에 대한 호스트 권한 필요)
 - `action`: 기본 아이콘 클릭 시 동작 (별도 popup 없이 `chrome.action.onClicked` 사용)
@@ -131,15 +132,37 @@ auto-scroll-save/
      자동 생성됨. 콜백에서 `chrome.runtime.lastError`를 확인해 실패한
      리소스는 콘솔에 경고 로그만 남기고 건너뛴다 (전체 프로세스를
      중단시키지 않음)
-   - **Referer 헤더 지정**: 이미지 서버가 Referer를 검사하는 핫링크 방지를
-     쓰는 경우 `SERVER_FORBIDDEN`으로 실패할 수 있다. `chrome.downloads.download`의
-     `headers` 옵션으로 `Referer`를 직접 지정하는 것은 **불가능**하다 —
-     시도하면 `Unsafe request header name` 에러가 나며 해당 다운로드 자체가
-     실패한다 (Referer는 fetch/XHR와 마찬가지로 스크립트가 직접 못 바꾸는
-     안전하지 않은 헤더로 취급됨). 대신 `declarativeNetRequest`의 세션
-     동적 규칙(`updateSessionRules`, `action.type: "modifyHeaders"`)으로
-     리소스 origin별로 Referer를 원본 페이지 URL로 덮어쓰는 규칙을 다운로드
-     직전에 등록하고, 끝나면 제거한다 (`withRefererOverride` 함수).
+   - **핫링크 방지(Referer/쿠키 검사) 우회 — `chrome.debugger`(CDP) 사용**:
+     이미지 서버가 Referer를 검사하는 핫링크 방지를 쓰면 `SERVER_FORBIDDEN`으로
+     실패할 수 있다. 아래 두 가지를 실제로 시도해봤지만 모두 안 됨을 확인했다:
+     - `chrome.downloads.download`의 `headers` 옵션으로 `Referer`를 직접
+       지정 → `Unsafe request header name` 에러 (Referer는 fetch/XHR와
+       마찬가지로 스크립트가 직접 못 바꾸는 안전하지 않은 헤더로 취급됨)
+     - `declarativeNetRequest`의 `modifyHeaders` 세션 규칙으로 네트워크
+       계층에서 Referer를 덮어쓰기 → 규칙은 정상 등록되지만 **`chrome.downloads.download`가
+       만드는 요청 자체에는 적용되지 않음**(실측 확인 — declarativeNetRequest/webRequest는
+       다운로드 매니저가 만드는 요청을 가로채지 못하는 크롬의 알려진 제약)
+     - **실제로 동작하는 방법**: `chrome.debugger`로 캡처 대상 탭에 CDP를
+       붙이고 `Network.loadNetworkResource({ frameId, url, options: {
+       includeCredentials: true } })`로 "그 프레임이 직접 요청한 것"처럼
+       리소스를 가져온다. 이러면 실제 페이지 요청과 동일하게 Referer/쿠키가
+       자동으로 붙고, CORS도 적용되지 않는다(디버깅 프로토콜은 페이지
+       스크립트가 아니라 브라우저 쪽 권한으로 응답을 읽음). 응답은
+       `resource.stream` 핸들로 오므로 `IO.read`를 반복 호출해 청크를 모으고
+       (각 청크의 `base64Encoded` 플래그를 보고 디코딩), `IO.close`로 스트림을
+       정리한다. 받은 바이트는 base64 data URL로 만들어 기존과 동일하게
+       `chrome.downloads.download`로 저장한다.
+     - 디버거는 캡처 대상 탭 하나에만, 리소스 다운로드 구간 동안만 붙였다가
+       끝나면 바로 뗀다(`attachDebuggerForResourceFetch` / `finally`에서
+       `chrome.debugger.detach`). 붙어 있는 동안 브라우저 상단에 "확장
+       프로그램이 이 브라우저를 디버깅하고 있습니다" 배너가 뜬다 — 이는
+       `chrome.debugger` API의 고정된 동작이라 없앨 수 없으며, README에
+       안내한다.
+     - **연결 실패 시 대체**: 이미 다른 DevTools가 그 탭에 붙어 있는 등
+       `chrome.debugger.attach`가 실패하면(자주 있을 수 있음 — 예: 사용자가
+       진단을 위해 개발자 도구를 열어둔 상태) 콘솔에 경고만 남기고 해당
+       리소스는 원래의 직접 `chrome.downloads.download(url)` 방식으로
+       대체한다 (핫링크 방지가 없는 사이트에서는 이 경로만으로도 충분함).
    - **콜백만으로는 부족함**: `chrome.downloads.download`의 콜백은 다운로드가
      "큐잉"됐다는 뜻일 뿐 실제 파일 완성을 보장하지 않는다 (크롬이 자동
      다운로드를 조용히 막는 경우 콜백은 정상 downloadId를 반환하고 상태만
