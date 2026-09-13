@@ -111,7 +111,13 @@ auto-scroll-save/
 
 1. 탭 제목(`tab.title`) 기반으로 `safeTitle` 생성
    (파일명에 쓸 수 없는 특수문자 `\ / : * ? " < > |` 제거)
-2. **리소스 파일들 먼저 다운로드**:
+2. **디버그 파일 저장** (`${safeTitle}.debug.txt`, saveAs: false): 리소스
+   다운로드/HTML 저장보다 먼저 만든다 — 이후 단계가 실패해도 어떤 확장
+   버전이 실행됐는지, 리소스가 몇 개/어떤 URL로 잡혔는지를 크롬 UI 없이
+   저장 폴더만 보고 확인할 수 있게 하기 위함. `chrome.runtime.getManifest().version`,
+   저장 시각, 탭 URL/제목, `resource_count`, 리소스별 `로컬파일명 <- 원본URL`
+   목록을 담는다.
+3. **리소스 파일들 먼저 다운로드**:
    - **원본 URL을 그대로 `chrome.downloads.download`에 전달**한다 —
      `fetch(url)`로 받아 base64 data URL로 변환하는 방식은 쓰지 않는다.
      (결정 배경: `fetch()`는 CORS 정책의 적용을 받아, `<img>` 태그로는
@@ -125,8 +131,8 @@ auto-scroll-save/
      중단시키지 않음)
    - (참고) `fetch` → base64 data URL 변환 방식은 **동적으로 생성한
      HTML 문자열**처럼 실제 네트워크 URL이 없는 콘텐츠를 다운로드할
-     때만 사용한다 (아래 3번 참고)
-3. **HTML 파일 다운로드**:
+     때만 사용한다 (아래 4번 참고)
+4. **HTML 파일 다운로드**:
    - 재작성된 HTML 문자열을 data URL(`data:text/html;charset=utf-8;base64,...`)로 변환
    - `chrome.downloads.download({ url: dataUrl, filename: "${safeTitle}.html", saveAs: false })`
      — 대화상자 없이 바로 저장 (아래 "저장 위치" 참고)
@@ -144,7 +150,7 @@ auto-scroll-save/
 >   위치(`E:\Temp`)에 함께 저장된다.
 > - README에 위 사전 설정 방법을 안내 문구로 반드시 포함할 것.
 
-4. 완료/실패 시 배지 텍스트 초기화 또는 실패 표시("X")
+5. 완료/실패 시 배지 텍스트 초기화 또는 실패 표시("X")
 
 **E. 에러 처리**
 - 각 단계(스크립트 주입 실패, 개별 리소스 fetch 실패, 다운로드 실패)를

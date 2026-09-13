@@ -113,6 +113,25 @@ async function handleCapture(tab) {
     const { html, resources } = result;
     const safeTitle = sanitizeTitle(tab.title);
 
+    // 어떤 버전이 실제로 실행됐는지, 리소스가 몇 개/어떤 URL로 잡혔는지를
+    // 파일로 남긴다 (사용자가 크롬 UI를 안 봐도 저장 폴더만으로 확인 가능).
+    // 이후 단계가 실패해도 진단할 수 있도록 리소스/HTML 다운로드보다 먼저 만든다.
+    const debugText = [
+      `extension_version: ${chrome.runtime.getManifest().version}`,
+      `saved_at: ${new Date().toISOString()}`,
+      `tab_url: ${tab.url || ''}`,
+      `tab_title: ${tab.title || ''}`,
+      `resource_count: ${resources.length}`,
+      'resources:',
+      ...resources.map(({ url, localFilename }) => `  ${localFilename}  <-  ${url}`),
+    ].join('\n');
+    const debugBase64 = await arrayBufferToBase64(new TextEncoder().encode(debugText).buffer);
+    await chrome.downloads.download({
+      url: `data:text/plain;charset=utf-8;base64,${debugBase64}`,
+      filename: `${safeTitle}.debug.txt`,
+      saveAs: false,
+    });
+
     for (const { url, localFilename } of resources) {
       await downloadResource(url, `${safeTitle}_files/${localFilename}`);
     }
