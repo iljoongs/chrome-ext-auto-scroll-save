@@ -56,18 +56,22 @@ async function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
-async function downloadResource(url, filename) {
-  try {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error(`HTTP ${response.status}`);
-    const buffer = await response.arrayBuffer();
-    const base64 = await arrayBufferToBase64(buffer);
-    const contentType = response.headers.get('content-type') || 'application/octet-stream';
-    const dataUrl = `data:${contentType};base64,${base64}`;
-    await chrome.downloads.download({ url: dataUrl, filename, saveAs: false });
-  } catch (err) {
-    console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`, err);
-  }
+// fetch()로 받아서 base64로 재변환하지 않고 원본 URL을 그대로 chrome.downloads.download에
+// 넘긴다. fetch()는 CORS 정책의 적용을 받아 <img> 태그로는 멀쩡히 보이는 이미지도
+// 다운로드에 실패하는 경우가 많은데, chrome.downloads.download는 일반 브라우저
+// 다운로드와 동일하게 동작해 CORS 제약을 받지 않는다.
+function downloadResource(url, filename) {
+  return new Promise((resolve) => {
+    chrome.downloads.download({ url, filename, saveAs: false }, () => {
+      if (chrome.runtime.lastError) {
+        console.warn(
+          `[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`,
+          chrome.runtime.lastError.message
+        );
+      }
+      resolve();
+    });
+  });
 }
 
 async function handleCapture(tab) {

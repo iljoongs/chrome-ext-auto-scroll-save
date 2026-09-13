@@ -94,14 +94,20 @@ auto-scroll-save/
 1. 탭 제목(`tab.title`) 기반으로 `safeTitle` 생성
    (파일명에 쓸 수 없는 특수문자 `\ / : * ? " < > |` 제거)
 2. **리소스 파일들 먼저 다운로드**:
-   - 각 리소스 URL을 `fetch(url)`로 받아 `blob()`으로 변환
-     (CORS 등으로 fetch 실패하는 리소스는 건너뛰고 콘솔에 경고 로그만 남길 것 —
-     전체 프로세스를 중단시키지 않음)
-   - 서비스 워커 환경 고려: blob을 `arrayBuffer()` → base64 → data URL로
-     변환해 `chrome.downloads.download`에 전달 (이전 MHTML 버전과 동일한 방식)
-   - `chrome.downloads.download({ url: dataUrl, filename: "${safeTitle}_files/${localFilename}", saveAs: false })`
+   - **원본 URL을 그대로 `chrome.downloads.download`에 전달**한다 —
+     `fetch(url)`로 받아 base64 data URL로 변환하는 방식은 쓰지 않는다.
+     (결정 배경: `fetch()`는 CORS 정책의 적용을 받아, `<img>` 태그로는
+     문제없이 보이는 이미지도 다운로드 단계에서 실패하는 경우가 많았다.
+     `chrome.downloads.download`는 일반 브라우저 다운로드와 동일하게
+     동작해 CORS 제약을 받지 않으므로, 실제 리소스 URL을 그대로 넘긴다.)
+   - `chrome.downloads.download({ url, filename: "${safeTitle}_files/${localFilename}", saveAs: false }, callback)`
      — `filename`에 `/`를 포함하면 다운로드 폴더 하위에 해당 경로로 폴더가
-     자동 생성됨
+     자동 생성됨. 콜백에서 `chrome.runtime.lastError`를 확인해 실패한
+     리소스는 콘솔에 경고 로그만 남기고 건너뛴다 (전체 프로세스를
+     중단시키지 않음)
+   - (참고) `fetch` → base64 data URL 변환 방식은 **동적으로 생성한
+     HTML 문자열**처럼 실제 네트워크 URL이 없는 콘텐츠를 다운로드할
+     때만 사용한다 (아래 3번 참고)
 3. **HTML 파일 다운로드**:
    - 재작성된 HTML 문자열을 data URL(`data:text/html;charset=utf-8;base64,...`)로 변환
    - `chrome.downloads.download({ url: dataUrl, filename: "${safeTitle}.html", saveAs: false })`
