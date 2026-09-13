@@ -56,20 +56,56 @@ async function arrayBufferToBase64(buffer) {
   return btoa(binary);
 }
 
+// chrome.downloads.download의 콜백은 다운로드가 "시작(큐잉)"됐다는 뜻일 뿐, 실제로
+// 파일이 완성됐는지는 알려주지 않는다 (크롬이 자동 다운로드를 조용히 막는 경우
+// 콜백은 정상 downloadId를 반환하고 이후 상태만 'interrupted'가 됨). 그래서
+// onChanged로 최종 상태('complete'/'interrupted')까지 직접 확인한다.
+function waitForDownloadFinish(downloadId, timeoutMs = 15000) {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (state, reason) => {
+      if (settled) return;
+      settled = true;
+      chrome.downloads.onChanged.removeListener(listener);
+      clearTimeout(timer);
+      resolve({ state, reason });
+    };
+    const listener = (delta) => {
+      if (delta.id !== downloadId || !delta.state) return;
+      if (delta.state.current === 'complete' || delta.state.current === 'interrupted') {
+        finish(delta.state.current, delta.error ? delta.error.current : undefined);
+      }
+    };
+    chrome.downloads.onChanged.addListener(listener);
+    const timer = setTimeout(() => finish('timeout'), timeoutMs);
+
+    chrome.downloads.search({ id: downloadId }, (results) => {
+      const item = results && results[0];
+      if (item && (item.state === 'complete' || item.state === 'interrupted')) {
+        finish(item.state, item.error);
+      }
+    });
+  });
+}
+
 // fetch()로 받아서 base64로 재변환하지 않고 원본 URL을 그대로 chrome.downloads.download에
 // 넘긴다. fetch()는 CORS 정책의 적용을 받아 <img> 태그로는 멀쩡히 보이는 이미지도
 // 다운로드에 실패하는 경우가 많은데, chrome.downloads.download는 일반 브라우저
 // 다운로드와 동일하게 동작해 CORS 제약을 받지 않는다.
 function downloadResource(url, filename) {
   return new Promise((resolve) => {
-    chrome.downloads.download({ url, filename, saveAs: false }, () => {
-      if (chrome.runtime.lastError) {
-        console.warn(
-          `[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`,
-          chrome.runtime.lastError.message
-        );
+    chrome.downloads.download({ url, filename, saveAs: false }, async (downloadId) => {
+      if (chrome.runtime.lastError || downloadId === undefined) {
+        const message = chrome.runtime.lastError ? chrome.runtime.lastError.message : 'downloadId 없음';
+        console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`, message);
+        resolve({ url, filename, ok: false, detail: message });
+        return;
       }
-      resolve();
+      const { state, reason } = await waitForDownloadFinish(downloadId);
+      if (state !== 'complete') {
+        console.warn(`[자동 스크롤 후 페이지 저장] 리소스 다운로드 실패: ${url}`, state, reason);
+      }
+      resolve({ url, filename, ok: state === 'complete', detail: reason || state });
     });
   });
 }
@@ -132,9 +168,28 @@ async function handleCapture(tab) {
       saveAs: false,
     });
 
+    const downloadResults = [];
     for (const { url, localFilename } of resources) {
-      await downloadResource(url, `${safeTitle}_files/${localFilename}`);
+      const res = await downloadResource(url, `${safeTitle}_files/${localFilename}`);
+      downloadResults.push(res);
     }
+
+    // 리소스별 실제 다운로드 결과(성공/실패 사유)를 별도 파일로 남긴다 —
+    // chrome.downloads.download 콜백만으로는 "큐잉 성공"과 "실제 파일 완성"을
+    // 구분할 수 없어서, 크롬이 조용히 막는 경우를 눈으로 확인하기 위함.
+    const resultText = [
+      `extension_version: ${chrome.runtime.getManifest().version}`,
+      `checked_at: ${new Date().toISOString()}`,
+      `ok_count: ${downloadResults.filter((r) => r.ok).length} / ${downloadResults.length}`,
+      'results:',
+      ...downloadResults.map((r) => `  [${r.ok ? 'OK' : 'FAIL'}] ${r.filename}  (${r.detail})  <-  ${r.url}`),
+    ].join('\n');
+    const resultBase64 = await arrayBufferToBase64(new TextEncoder().encode(resultText).buffer);
+    await chrome.downloads.download({
+      url: `data:text/plain;charset=utf-8;base64,${resultBase64}`,
+      filename: `${safeTitle}.debug-result.txt`,
+      saveAs: false,
+    });
 
     const htmlBytes = new TextEncoder().encode(html);
     const htmlBase64 = await arrayBufferToBase64(htmlBytes.buffer);

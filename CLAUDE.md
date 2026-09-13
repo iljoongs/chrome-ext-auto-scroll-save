@@ -129,6 +129,15 @@ auto-scroll-save/
      자동 생성됨. 콜백에서 `chrome.runtime.lastError`를 확인해 실패한
      리소스는 콘솔에 경고 로그만 남기고 건너뛴다 (전체 프로세스를
      중단시키지 않음)
+   - **콜백만으로는 부족함**: `chrome.downloads.download`의 콜백은 다운로드가
+     "큐잉"됐다는 뜻일 뿐 실제 파일 완성을 보장하지 않는다 (크롬이 자동
+     다운로드를 조용히 막는 경우 콜백은 정상 downloadId를 반환하고 상태만
+     나중에 `interrupted`가 됨). `chrome.downloads.onChanged`(+ 최초 상태
+     확인용 `chrome.downloads.search`)로 `complete`/`interrupted` 최종
+     상태까지 확인해서 실제 성공 여부를 판단한다.
+   - 리소스별 성공/실패 결과를 `${safeTitle}.debug-result.txt`로 남긴다
+     (버전, 성공 개수, 리소스별 `[OK|FAIL] 파일명 (사유) <- URL`) — 위
+     "디버그 파일"과 마찬가지로 크롬 UI 없이 저장 폴더만으로 진단하기 위함
    - (참고) `fetch` → base64 data URL 변환 방식은 **동적으로 생성한
      HTML 문자열**처럼 실제 네트워크 URL이 없는 콘텐츠를 다운로드할
      때만 사용한다 (아래 4번 참고)
