@@ -7,6 +7,10 @@ const MAX_SCROLL_ITERATIONS = 400;
 // "다음화"를 계속 따라가다 무한 루프(예: 다음화 링크가 순환하는 경우)에
 // 빠지지 않도록 하는 안전장치 — 한 번 클릭으로 저장할 최대 챕터 수
 const MAX_CHAPTERS = 500;
+// 평소엔 끄고, 나중에 문제가 생기면 true로 바꿔서 저장 폴더에
+// `<제목>.debug.txt`/`<제목>.debug-result.txt`(버전, 수집된 리소스 목록,
+// 리소스별 성공/실패 사유)를 남기도록 켤 수 있다.
+const DEBUG_FILES_ENABLED = false;
 
 // chrome.scripting.executeScript(func: ...)로 페이지 컨텍스트에 주입되는 함수.
 // 이 함수 안에서는 background.js의 다른 변수/함수를 참조할 수 없다.
@@ -275,21 +279,24 @@ async function captureCurrentPage(tab) {
   // 어떤 버전이 실제로 실행됐는지, 리소스가 몇 개/어떤 URL로 잡혔는지를
   // 파일로 남긴다 (사용자가 크롬 UI를 안 봐도 저장 폴더만으로 확인 가능).
   // 이후 단계가 실패해도 진단할 수 있도록 리소스/HTML 다운로드보다 먼저 만든다.
-  const debugText = [
-    `extension_version: ${chrome.runtime.getManifest().version}`,
-    `saved_at: ${new Date().toISOString()}`,
-    `tab_url: ${tab.url || ''}`,
-    `tab_title: ${tab.title || ''}`,
-    `resource_count: ${resources.length}`,
-    'resources:',
-    ...resources.map(({ url, localFilename }) => `  ${localFilename}  <-  ${url}`),
-  ].join('\n');
-  const debugBase64 = await arrayBufferToBase64(new TextEncoder().encode(debugText).buffer);
-  await chrome.downloads.download({
-    url: `data:text/plain;charset=utf-8;base64,${debugBase64}`,
-    filename: `${safeTitle}.debug.txt`,
-    saveAs: false,
-  });
+  // 평소엔 DEBUG_FILES_ENABLED로 꺼 두고, 문제가 생기면 켜서 쓴다.
+  if (DEBUG_FILES_ENABLED) {
+    const debugText = [
+      `extension_version: ${chrome.runtime.getManifest().version}`,
+      `saved_at: ${new Date().toISOString()}`,
+      `tab_url: ${tab.url || ''}`,
+      `tab_title: ${tab.title || ''}`,
+      `resource_count: ${resources.length}`,
+      'resources:',
+      ...resources.map(({ url, localFilename }) => `  ${localFilename}  <-  ${url}`),
+    ].join('\n');
+    const debugBase64 = await arrayBufferToBase64(new TextEncoder().encode(debugText).buffer);
+    await chrome.downloads.download({
+      url: `data:text/plain;charset=utf-8;base64,${debugBase64}`,
+      filename: `${safeTitle}.debug.txt`,
+      saveAs: false,
+    });
+  }
 
   // 디버거를 붙이면 브라우저 상단에 "디버깅 중" 배너가 뜨지만, Referer/쿠키
   // 검사가 있는 핫링크 방지 리소스까지 받아오려면 이 방법뿐이다. 연결에
@@ -328,19 +335,22 @@ async function captureCurrentPage(tab) {
   // 리소스별 실제 다운로드 결과(성공/실패 사유)를 별도 파일로 남긴다 —
   // chrome.downloads.download 콜백만으로는 "큐잉 성공"과 "실제 파일 완성"을
   // 구분할 수 없어서, 크롬이 조용히 막는 경우를 눈으로 확인하기 위함.
-  const resultText = [
-    `extension_version: ${chrome.runtime.getManifest().version}`,
-    `checked_at: ${new Date().toISOString()}`,
-    `ok_count: ${downloadResults.filter((r) => r.ok).length} / ${downloadResults.length}`,
-    'results:',
-    ...downloadResults.map((r) => `  [${r.ok ? 'OK' : 'FAIL'}] ${r.filename}  (${r.detail})  <-  ${r.url}`),
-  ].join('\n');
-  const resultBase64 = await arrayBufferToBase64(new TextEncoder().encode(resultText).buffer);
-  await chrome.downloads.download({
-    url: `data:text/plain;charset=utf-8;base64,${resultBase64}`,
-    filename: `${safeTitle}.debug-result.txt`,
-    saveAs: false,
-  });
+  // 평소엔 DEBUG_FILES_ENABLED로 꺼 두고, 문제가 생기면 켜서 쓴다.
+  if (DEBUG_FILES_ENABLED) {
+    const resultText = [
+      `extension_version: ${chrome.runtime.getManifest().version}`,
+      `checked_at: ${new Date().toISOString()}`,
+      `ok_count: ${downloadResults.filter((r) => r.ok).length} / ${downloadResults.length}`,
+      'results:',
+      ...downloadResults.map((r) => `  [${r.ok ? 'OK' : 'FAIL'}] ${r.filename}  (${r.detail})  <-  ${r.url}`),
+    ].join('\n');
+    const resultBase64 = await arrayBufferToBase64(new TextEncoder().encode(resultText).buffer);
+    await chrome.downloads.download({
+      url: `data:text/plain;charset=utf-8;base64,${resultBase64}`,
+      filename: `${safeTitle}.debug-result.txt`,
+      saveAs: false,
+    });
+  }
 
   const htmlBytes = new TextEncoder().encode(html);
   const htmlBase64 = await arrayBufferToBase64(htmlBytes.buffer);
