@@ -55,14 +55,20 @@ auto-scroll-save/
   `setInterval`로 20초마다 가벼운 크롬 API(`chrome.runtime.getPlatformInfo`)를
   호출해 서비스 워커가 도중에 죽지 않도록 한다.
 
-**B. 자동 스크롤 + 이미지 로딩 대기** (기존과 동일, 변경 없음)
+**B. 자동 스크롤 + 이미지 로딩 대기**
 - `chrome.scripting.executeScript`로 페이지 컨텍스트에 스크롤 함수 주입
   - `window.scrollBy`로 일정 간격(기본 500px, 350ms 간격) 반복 스크롤,
     `document.body.scrollHeight`에 도달하면 종료
   - 이후 `document.images`의 모든 `img.complete`가 `true`가 될 때까지
     최대 8초 폴링 대기 (300ms 간격)
+  - **추가 고정 대기**: 위 이미지 완료 대기와는 별개로, `POST_SCROLL_WAIT_MS`
+    (기본 10초) 만큼 한 번 더 고정으로 기다린다 — 스크롤을 기반으로 추가
+    콘텐츠를 불러오는 페이지(예: 스크롤로 다음 배치를 불러오는 뷰어)에
+    여유를 주기 위함. `img.complete` 여부와 무관하게 항상 이 시간만큼
+    기다린 뒤 다음 단계로 넘어간다.
   - 완료 후 `window.scrollTo(0, 0)`으로 상단 복귀
-  - async function + Promise 반환, `intervalMs`/`maxWaitMs` 상수로 분리
+  - async function + Promise 반환, `intervalMs`/`maxWaitMs`/`postScrollWaitMs`
+    상수로 분리
 
 **C. 리소스 수집 및 HTML 재작성 (content-capture.js, 페이지 컨텍스트에서 실행)**
 

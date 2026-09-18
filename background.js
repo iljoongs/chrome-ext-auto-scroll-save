@@ -2,6 +2,10 @@ const SCROLL_STEP_PX = 500;
 const SCROLL_INTERVAL_MS = 350;
 const IMAGE_WAIT_INTERVAL_MS = 300;
 const IMAGE_WAIT_MAX_MS = 8000;
+// 스크롤이 끝난 뒤 저장(캡처)을 시작하기 전에 추가로 고정으로 기다리는 시간 —
+// 이미지 로딩 대기(IMAGE_WAIT_MAX_MS)와 별개로, 페이지 자체의 추가 콘텐츠
+// 로딩(예: 스크롤 기반 추가 페이지 로딩)에 여유를 주기 위한 것
+const POST_SCROLL_WAIT_MS = 10000;
 // 무한 스크롤 페이지에서 스크롤이 끝없이 이어지는 것을 막기 위한 안전장치
 const MAX_SCROLL_ITERATIONS = 400;
 // "다음화"를 계속 따라가다 무한 루프(예: 다음화 링크가 순환하는 경우)에
@@ -19,7 +23,8 @@ async function scrollAndWaitForImages(
   scrollIntervalMs,
   imageWaitIntervalMs,
   imageWaitMaxMs,
-  maxIterations
+  maxIterations,
+  postScrollWaitMs
 ) {
   let lastScrollY = -1;
   for (let i = 0; i < maxIterations; i++) {
@@ -42,6 +47,12 @@ async function scrollAndWaitForImages(
     const images = Array.from(document.images);
     if (images.every((img) => img.complete)) break;
     await new Promise((resolve) => setTimeout(resolve, imageWaitIntervalMs));
+  }
+
+  // 이미지 완료 대기와 별개로, 저장(캡처)을 시작하기 전에 한 번 더 고정으로
+  // 기다린다 — 스크롤 기반으로 추가 콘텐츠를 불러오는 페이지에 여유를 준다.
+  if (postScrollWaitMs > 0) {
+    await new Promise((resolve) => setTimeout(resolve, postScrollWaitMs));
   }
 
   window.scrollTo(0, 0);
@@ -258,7 +269,14 @@ async function captureCurrentPage(tab) {
   await chrome.scripting.executeScript({
     target: { tabId },
     func: scrollAndWaitForImages,
-    args: [SCROLL_STEP_PX, SCROLL_INTERVAL_MS, IMAGE_WAIT_INTERVAL_MS, IMAGE_WAIT_MAX_MS, MAX_SCROLL_ITERATIONS],
+    args: [
+      SCROLL_STEP_PX,
+      SCROLL_INTERVAL_MS,
+      IMAGE_WAIT_INTERVAL_MS,
+      IMAGE_WAIT_MAX_MS,
+      MAX_SCROLL_ITERATIONS,
+      POST_SCROLL_WAIT_MS,
+    ],
   });
 
   await chrome.scripting.executeScript({
