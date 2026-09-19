@@ -260,10 +260,19 @@ function startKeepAlive() {
   return () => clearInterval(id);
 }
 
+// 페이지 제목이 숫자로 시작하면(예: "55화 - ...") 시작 전에 입력받은 제목을
+// 앞에 붙인다. 숫자로 시작하지 않는 제목이나 입력된 제목이 없으면 그대로 쓴다.
+function buildEffectiveTitle(pageTitle, titlePrefix) {
+  const title = (pageTitle || '').trim();
+  const prefix = (titlePrefix || '').trim();
+  if (prefix && /^\d/.test(title)) return `${prefix} ${title}`;
+  return title;
+}
+
 // 현재 tab에서 스크롤 → 캡처 → 리소스/HTML 다운로드까지 한 챕터 분량을
 // 처리한다. 실패하면 예외를 던진다 (호출부의 handleCaptureAllChapters가
 // 배지를 "X"로 바꾸고 멈춘다).
-async function captureCurrentPage(tab) {
+async function captureCurrentPage(tab, titlePrefix) {
   const tabId = tab.id;
 
   await chrome.scripting.executeScript({
@@ -279,6 +288,18 @@ async function captureCurrentPage(tab) {
     ],
   });
 
+  // 저장 파일명/폴더명에 쓸 제목. content-capture가 HTML 안의 리소스 경로를
+  // `<제목>_files/...`로 만들 수 있도록 주입 전에 폴더명을 먼저 넘겨 둔다.
+  const safeTitle = sanitizeTitle(buildEffectiveTitle(tab.title, titlePrefix));
+
+  await chrome.scripting.executeScript({
+    target: { tabId },
+    func: (folder) => {
+      window.__autoScrollSaveFolder = folder;
+    },
+    args: [`${safeTitle}_files`],
+  });
+
   await chrome.scripting.executeScript({
     target: { tabId },
     files: ['content-capture.js'],
@@ -292,7 +313,6 @@ async function captureCurrentPage(tab) {
   if (!result) throw new Error('페이지 캡처 결과가 비어 있습니다.');
 
   const { html, resources } = result;
-  const safeTitle = sanitizeTitle(tab.title);
 
   // 어떤 버전이 실제로 실행됐는지, 리소스가 몇 개/어떤 URL로 잡혔는지를
   // 파일로 남긴다 (사용자가 크롬 UI를 안 봐도 저장 폴더만으로 확인 가능).
@@ -411,16 +431,19 @@ function navigateAndWaitForLoad(tabId, url, timeoutMs = 30000) {
   });
 }
 
-// tabId -> { stopRequested } — 진행 중인 탭을 추적해서, 진행 중에 아이콘을
-// 다시 클릭하면 새로 시작하는 대신 중단 신호를 보내도록 한다.
+// tabId -> { stopRequested } — 진행 중인 탭을 추적해서, 팝업의 "중단" 버튼이
+// 눌리면 stopRequested를 켜서 루프가 다음 화로 넘어가기 전에 멈추게 한다.
 const runningTabs = new Map();
 
-// 아이콘 클릭 시 진입점. 클릭된 페이지부터 시작해서, "다음화" 링크를 계속
-// 따라가며 매 화마다 스크롤+캡처+저장을 반복한다. "다음화"가 비활성화된
-// (링크 자체가 없어진) 마지막 화에 도달하면 멈춘다. 배지에는 지금까지 저장한
+// 팝업의 "시작" 버튼이 진입점. options = { mode: 'single' | 'continuous',
+// title: 시작 전에 입력받은 제목(선택) }. 클릭된 페이지부터 저장하고,
+// 'continuous'면 "다음화" 링크를 계속 따라가며 매 화마다 스크롤+캡처+저장을
+// 반복한다. "다음화"가 비활성화된(링크 자체가 없어진) 마지막 화에 도달하면
+// 멈춘다. 'single'이면 현재 화 하나만 저장하고 끝낸다. 배지에는 지금까지 저장한
 // 화 수를 표시한다. 저장 중인 화의 다운로드는 끝까지 마친 뒤, 다음 화로
 // 넘어가기 전에 중단 여부를 확인한다(중간에 파일이 절반만 받아지는 것을 방지).
-async function handleCaptureAllChapters(initialTab) {
+async function handleCaptureAllChapters(initialTab, options) {
+  const { mode = 'continuous', title = '' } = options || {};
   if (!initialTab || !initialTab.id) return;
   const tabId = initialTab.id;
   const state = { stopRequested: false };
@@ -433,9 +456,9 @@ async function handleCaptureAllChapters(initialTab) {
       if (state.stopRequested) break;
 
       await chrome.action.setBadgeText({ tabId, text: String(chapterCount) });
-      await captureCurrentPage(tab);
+      await captureCurrentPage(tab, title);
 
-      if (state.stopRequested) break;
+      if (mode === 'single' || state.stopRequested) break;
 
       const nextUrl = await findNextEpisodeUrlForTab(tabId);
       if (!nextUrl) break;
@@ -457,12 +480,36 @@ async function handleCaptureAllChapters(initialTab) {
   }
 }
 
-chrome.action.onClicked.addListener((tab) => {
-  const existing = runningTabs.get(tab.id);
-  if (existing) {
-    // 이미 이 탭에서 진행 중이면 새로 시작하지 않고 중단 신호만 보낸다.
-    existing.stopRequested = true;
-    return;
+// 팝업(popup.js)과의 메시지 통신: 진행 상태 조회 / 시작 / 중단
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+  if (!msg || typeof msg.type !== 'string') return false;
+
+  if (msg.type === 'status') {
+    sendResponse({ running: runningTabs.has(msg.tabId) });
+    return false;
   }
-  handleCaptureAllChapters(tab);
+
+  if (msg.type === 'stop') {
+    const state = runningTabs.get(msg.tabId);
+    if (state) state.stopRequested = true;
+    sendResponse({ ok: true });
+    return false;
+  }
+
+  if (msg.type === 'start') {
+    if (runningTabs.has(msg.tabId)) {
+      sendResponse({ ok: false, reason: 'already-running' });
+      return false;
+    }
+    chrome.tabs
+      .get(msg.tabId)
+      .then((tab) => {
+        handleCaptureAllChapters(tab, { mode: msg.mode, title: msg.title });
+        sendResponse({ ok: true });
+      })
+      .catch((err) => sendResponse({ ok: false, reason: err.message }));
+    return true;
+  }
+
+  return false;
 });

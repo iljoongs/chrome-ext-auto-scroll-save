@@ -26,6 +26,7 @@ auto-scroll-save/
 ├── manifest.json
 ├── background.js
 ├── content-capture.js   (DOM 캡처 + 리소스 목록 수집 + HTML 재작성)
+├── popup.html / popup.js (시작 전 제목 입력 + 1장/연속 모드 선택, 진행 중엔 중단 버튼)
 └── README.md (또는 사용법.txt) - 설치/사용법 안내
 ```
 
@@ -41,13 +42,27 @@ auto-scroll-save/
   동안 브라우저에 "디버깅 중" 배너가 뜬다)
 - `host_permissions`: `["<all_urls>"]`
   (리소스 파일을 `fetch`로 받아오려면 대상 사이트에 대한 호스트 권한 필요)
-- `action`: 기본 아이콘 클릭 시 동작 (별도 popup 없이 `chrome.action.onClicked` 사용)
+- `action`: `default_popup: "popup.html"` (아이콘 클릭 시 팝업이 열려 제목 입력/모드 선택 —
+  아래 A 참고. 팝업이 있으므로 `chrome.action.onClicked`는 쓰지 않는다)
 - `background.service_worker`: `background.js`
 
 ### 처리 흐름 (background.js가 오케스트레이션)
 
 **A. 트리거**
-- `chrome.action.onClicked` 리스너에서 시작. 클릭된 탭(`tab`)을 대상으로 동작.
+- **팝업(`popup.html`/`popup.js`)에서 시작**한다 (`action.default_popup`; 팝업이
+  있으면 `chrome.action.onClicked`는 발생하지 않으므로 사용하지 않는다).
+  아이콘을 클릭하면 팝업이 열리고, 진행 중이 아닐 때는 다음 입력을 받는다:
+  - **제목** (선택): 작업 시작 전에 입력. 저장할 페이지의 제목이 **숫자로
+    시작하면**(정규식 `/^\d/`, 예: `55화 - 늑대닷컴`) 입력한 제목을 앞에 붙여
+    `입력제목 55화 - 늑대닷컴`으로 저장한다(파일명·`_files` 폴더명 모두).
+    숫자로 시작하지 않는 제목이나 입력이 비어 있으면 페이지 제목 그대로 쓴다
+    (`buildEffectiveTitle`). 마지막 입력값은 팝업의 `localStorage`에 기억한다.
+  - **모드**: `single`(현재 화만 저장) / `continuous`(연속 저장 — 아래 E,
+    기본값). 이것도 마지막 선택을 기억한다.
+  - "시작"을 누르면 팝업이 `chrome.runtime.sendMessage({ type: 'start',
+    tabId, mode, title })`로 background에 시작을 요청하고 닫힌다.
+  - 진행 중일 때 아이콘을 누르면 팝업이 `{ type: 'status' }`로 진행 여부를
+    확인해 "중단" 버튼만 보여준다(`{ type: 'stop' }` 전송).
 - 진행 표시: `chrome.action.setBadgeText({tabId, text: "..."})`.
 - **서비스 워커 keepalive**: MV3 서비스 워커는 ~30초간 활동이 없으면 크롬이
   중간에 강제 종료시키는데, 스크롤+대기+리소스 순차 다운로드를 합치면 이
@@ -109,7 +124,13 @@ auto-scroll-save/
    - **실제 DOM을 건드리지 않고**, `document.documentElement.cloneNode(true)`로
      복제본을 만들어 그 위에서 속성을 치환한다 (라이브 페이지에 영향 없어야 함)
    - 수집된 각 리소스 URL을 위 로컬 파일명으로 교체
-     (예: `src="https://site.com/img/a.jpg"` → `src="제목_files/a.jpg"`)
+     (예: `src="https://site.com/img/a.jpg"` → `src="제목_files/a.jpg"`).
+     **반드시 `<제목>_files/` 폴더 경로를 포함**해야 한다(리소스는 그 폴더에
+     저장되므로). background.js가 content-capture 주입 **전에**
+     `window.__autoScrollSaveFolder`에 `${safeTitle}_files`를 넣어 주고,
+     content-capture는 `toLocalRef()`로 폴더/파일명을 각각
+     `encodeURIComponent` 처리한 상대 경로를 만든다 (인라인 CSS는
+     `url("...")`로 따옴표를 붙여 공백이 있어도 안전하게).
    - 최종적으로 `'<!DOCTYPE html>\n' + clonedElement.outerHTML`을 완성된
      HTML 문자열로 만든다
 5. 이 단계의 결과로 아래 두 가지를 background.js로 반환한다:
@@ -118,7 +139,8 @@ auto-scroll-save/
 
 **D. 다운로드 처리 (background.js)**
 
-1. 탭 제목(`tab.title`) 기반으로 `safeTitle` 생성
+1. 탭 제목(`tab.title`)에 위 A의 제목 규칙(숫자로 시작하면 입력 제목을 앞에
+   붙임, `buildEffectiveTitle`)을 적용한 뒤 `safeTitle` 생성
    (파일명에 쓸 수 없는 특수문자 `\ / : * ? " < > |` 제거)
 2. **디버그 파일 저장** (`${safeTitle}.debug.txt`, saveAs: false): 리소스
    다운로드/HTML 저장보다 먼저 만든다 — 이후 단계가 실패해도 어떤 확장
@@ -207,7 +229,8 @@ auto-scroll-save/
 
 **E. "다음화" 자동 이동 (여러 화 연속 저장)**
 
-아이콘 클릭 시 한 페이지만 저장하지 않고, "다음화" 링크를 계속 따라가며
+팝업에서 **연속 저장** 모드를 선택하면(`single`이면 현재 화 하나만 저장하고
+끝) "다음화" 링크를 계속 따라가며
 매 화를 스크롤+캡처+저장한 뒤, 다음화가 비활성화된 마지막 화에서 멈춘다.
 (대상 사이트: `wfwf497.com` 계열 뷰어. 페이지 구조: `<a class="vnav-btn"
 href="/view?toon=...&num=N">`가 이전화/다음화 두 개 있고, href의 `num`
@@ -235,8 +258,8 @@ href="/view?toon=...&num=N">`가 이전화/다음화 두 개 있고, href의 `nu
    배지에 "X" 표시 — 중간에 실패한 채로 계속 다음 화로 넘어가 사용자가
    못 알아채는 것을 방지
 4. **중단**: `runningTabs`(탭ID → `{ stopRequested }`)로 진행 중인 탭을
-   추적한다. 진행 중에 아이콘을 다시 클릭하면 새로 시작하지 않고
-   `stopRequested`만 `true`로 바꾼다. 루프는 각 화 저장이 끝난 시점(다음
+   추적한다. 진행 중에 아이콘을 눌러 나오는 팝업의 "중단" 버튼(`stop` 메시지)이
+   새로 시작하지 않고 `stopRequested`만 `true`로 바꾼다. 루프는 각 화 저장이 끝난 시점(다음
    화로 넘어가기 직전)에 이 플래그를 확인해서 멈춘다 — 파일을 받다가
    중간에 끊어서 절반만 저장되는 것을 피하기 위해, 진행 중인 한 화의
    다운로드 자체를 즉시 취소하지는 않는다.

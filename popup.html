@@ -1,0 +1,42 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<title>자동 스크롤 후 페이지 저장</title>
+<style>
+  body { width: 300px; margin: 0; padding: 14px; font: 13px/1.5 "Malgun Gothic", system-ui, sans-serif; }
+  h1 { font-size: 14px; margin: 0 0 10px; }
+  label.field { display: block; margin-bottom: 4px; font-weight: 600; }
+  input[type="text"] { width: 100%; box-sizing: border-box; padding: 6px 8px; margin-bottom: 4px; }
+  .hint { color: #666; font-size: 11px; margin-bottom: 12px; }
+  .modes { margin-bottom: 14px; }
+  .modes label { display: block; padding: 2px 0; cursor: pointer; }
+  button { width: 100%; padding: 8px; font-size: 13px; cursor: pointer; }
+  #status { margin-bottom: 10px; color: #b00020; }
+  [hidden] { display: none !important; }
+</style>
+</head>
+<body>
+  <h1>자동 스크롤 후 페이지 저장</h1>
+
+  <div id="running" hidden>
+    <p id="status">저장 진행 중입니다.</p>
+    <button id="stop" type="button">중단 (현재 화 저장 후 멈춤)</button>
+  </div>
+
+  <div id="idle" hidden>
+    <label class="field" for="title">제목</label>
+    <input id="title" type="text" placeholder="예: 광마회귀" autocomplete="off">
+    <div class="hint">페이지 제목이 숫자로 시작하면 이 제목을 앞에 붙여 저장합니다.</div>
+
+    <div class="modes">
+      <label><input type="radio" name="mode" value="single"> 현재 화만 저장</label>
+      <label><input type="radio" name="mode" value="continuous" checked> 연속 저장 (다음화가 없을 때까지)</label>
+    </div>
+
+    <button id="start" type="button">시작</button>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

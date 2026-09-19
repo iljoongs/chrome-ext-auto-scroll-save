@@ -5,6 +5,14 @@
   const resourceMap = new Map(); // 절대 URL -> 로컬 파일명
   const usedNames = new Set();
 
+  // background.js가 주입 전에 window.__autoScrollSaveFolder에 `<제목>_files`를
+  // 넣어 둔다. HTML이 리소스 폴더 안의 파일을 가리키도록 상대 경로를 만든다.
+  function toLocalRef(localFilename) {
+    const folder = window.__autoScrollSaveFolder;
+    const file = encodeURIComponent(localFilename);
+    return folder ? `${encodeURIComponent(folder)}/${file}` : file;
+  }
+
   function toAbsoluteUrl(url) {
     if (!url) return null;
     try {
@@ -71,7 +79,7 @@
     return cssText.replace(CSS_URL_RE, (full, quote, url) => {
       const abs = toAbsoluteUrl(url);
       if (abs && resourceMap.has(abs)) {
-        return `url(${resourceMap.get(abs)})`;
+        return `url("${toLocalRef(resourceMap.get(abs))}")`;
       }
       return full;
     });
@@ -159,7 +167,7 @@
     const realSrc = lazyAttr ? img.getAttribute(lazyAttr) : img.getAttribute('src');
     const abs = toAbsoluteUrl(realSrc);
     if (abs && resourceMap.has(abs)) {
-      img.setAttribute('src', resourceMap.get(abs));
+      img.setAttribute('src', toLocalRef(resourceMap.get(abs)));
     }
     LAZY_SRC_ATTRS.forEach((attr) => img.removeAttribute(attr));
     LAZY_SRCSET_ATTRS.forEach((attr) => img.removeAttribute(attr));
@@ -177,7 +185,7 @@
   clone.querySelectorAll('video[poster]').forEach((video) => {
     const abs = toAbsoluteUrl(video.getAttribute('poster'));
     if (abs && resourceMap.has(abs)) {
-      video.setAttribute('poster', resourceMap.get(abs));
+      video.setAttribute('poster', toLocalRef(resourceMap.get(abs)));
     }
   });
 
@@ -192,14 +200,14 @@
   clone.querySelectorAll('link[rel~="stylesheet"]').forEach((link) => {
     const abs = toAbsoluteUrl(link.getAttribute('href'));
     if (abs && resourceMap.has(abs)) {
-      link.setAttribute('href', resourceMap.get(abs));
+      link.setAttribute('href', toLocalRef(resourceMap.get(abs)));
     }
   });
 
   clone.querySelectorAll('link[rel~="icon"]').forEach((link) => {
     const abs = toAbsoluteUrl(link.getAttribute('href'));
     if (abs && resourceMap.has(abs)) {
-      link.setAttribute('href', resourceMap.get(abs));
+      link.setAttribute('href', toLocalRef(resourceMap.get(abs)));
     }
   });
 
