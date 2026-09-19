@@ -125,10 +125,10 @@ auto-scroll-save/
    버전이 실행됐는지, 리소스가 몇 개/어떤 URL로 잡혔는지를 크롬 UI 없이
    저장 폴더만 보고 확인할 수 있게 하기 위함. `chrome.runtime.getManifest().version`,
    저장 시각, 탭 URL/제목, `resource_count`, 리소스별 `로컬파일명 <- 원본URL`
-   목록을 담는다. **평소엔 끔** — background.js 상단의 `DEBUG_FILES_ENABLED`
-   상수(기본 `false`)로 켜고 끈다. 새로운 문제가 생겨 원인을 진단해야 할
-   때만 `true`로 바꿔서 쓰고, 확인이 끝나면 다시 `false`로 되돌린다
-   (평소 저장 폴더에 부가 파일이 계속 쌓이지 않도록).
+   목록을 담는다. background.js 상단의 `DEBUG_FILES_ENABLED` 상수로 켜고
+   끈다. 평소엔 `false`로 두고, 원인을 진단해야 할 때만 `true`로 바꿔서
+   쓴 뒤 확인이 끝나면 다시 `false`로 되돌린다 (평소 저장 폴더에 부가
+   파일이 계속 쌓이지 않도록). **현재는 `true`(켜짐) 상태.**
 3. **리소스 파일들 먼저 다운로드**:
    - **원본 URL을 그대로 `chrome.downloads.download`에 전달**한다 —
      `fetch(url)`로 받아 base64 data URL로 변환하는 방식은 쓰지 않는다.

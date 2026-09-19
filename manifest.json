@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "자동 스크롤 후 페이지 저장",
   "description": "페이지를 끝까지 자동으로 스크롤해 지연 로딩 이미지를 모두 불러온 뒤, HTML 파일과 리소스 폴더 형태로 저장합니다.",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "permissions": ["activeTab", "scripting", "downloads", "debugger"],
   "host_permissions": ["<all_urls>"],
   "background": {

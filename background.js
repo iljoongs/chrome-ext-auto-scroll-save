@@ -14,7 +14,7 @@ const MAX_CHAPTERS = 500;
 // 평소엔 끄고, 나중에 문제가 생기면 true로 바꿔서 저장 폴더에
 // `<제목>.debug.txt`/`<제목>.debug-result.txt`(버전, 수집된 리소스 목록,
 // 리소스별 성공/실패 사유)를 남기도록 켤 수 있다.
-const DEBUG_FILES_ENABLED = false;
+const DEBUG_FILES_ENABLED = true;
 
 // chrome.scripting.executeScript(func: ...)로 페이지 컨텍스트에 주입되는 함수.
 // 이 함수 안에서는 background.js의 다른 변수/함수를 참조할 수 없다.
