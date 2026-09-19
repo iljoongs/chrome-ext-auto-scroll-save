@@ -77,7 +77,7 @@ auto-scroll-save/
   - 이후 `document.images`의 모든 `img.complete`가 `true`가 될 때까지
     최대 8초 폴링 대기 (300ms 간격)
   - **추가 고정 대기**: 위 이미지 완료 대기와는 별개로, `POST_SCROLL_WAIT_MS`
-    (기본 10초) 만큼 한 번 더 고정으로 기다린다 — 스크롤을 기반으로 추가
+    (기본 5초) 만큼 한 번 더 고정으로 기다린다 — 스크롤을 기반으로 추가
     콘텐츠를 불러오는 페이지(예: 스크롤로 다음 배치를 불러오는 뷰어)에
     여유를 주기 위함. `img.complete` 여부와 무관하게 항상 이 시간만큼
     기다린 뒤 다음 단계로 넘어간다.
@@ -252,7 +252,7 @@ href="/view?toon=...&num=N">`가 이전화/다음화 두 개 있고, href의 `nu
      d. 있으면 `chrome.tabs.update(tabId, { url })`로 이동시키고,
         `chrome.tabs.onUpdated`의 `status: 'complete'`까지 기다린 뒤
         (경쟁 상태 방지를 위해 리스너를 `tabs.update` 호출 **전에** 등록),
-        페이지 자체 초기화 스크립트가 끝나도록 짧게(500ms) 더 대기하고
+        페이지 자체 초기화 스크립트가 끝나도록 `PAGE_CHANGE_WAIT_MS`(기본 5초)만큼 더 대기하고
         `chrome.tabs.get`으로 갱신된 `tab`(제목 등)을 다시 읽는다
 3. 한 화가 실패하면(`captureCurrentPage`가 예외를 던지면) 전체를 멈추고
    배지에 "X" 표시 — 중간에 실패한 채로 계속 다음 화로 넘어가 사용자가

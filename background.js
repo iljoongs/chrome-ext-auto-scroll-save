@@ -5,7 +5,10 @@ const IMAGE_WAIT_MAX_MS = 8000;
 // 스크롤이 끝난 뒤 저장(캡처)을 시작하기 전에 추가로 고정으로 기다리는 시간 —
 // 이미지 로딩 대기(IMAGE_WAIT_MAX_MS)와 별개로, 페이지 자체의 추가 콘텐츠
 // 로딩(예: 스크롤 기반 추가 페이지 로딩)에 여유를 주기 위한 것
-const POST_SCROLL_WAIT_MS = 10000;
+const POST_SCROLL_WAIT_MS = 5000;
+// 다음 화로 페이지가 바뀐 뒤(로딩 완료 후) 스크롤/캡처를 시작하기 전에
+// 기다리는 시간 — 페이지 자체의 초기화 스크립트(광고, 뷰어 초기화 등)에 여유를 준다
+const PAGE_CHANGE_WAIT_MS = 5000;
 // 무한 스크롤 페이지에서 스크롤이 끝없이 이어지는 것을 막기 위한 안전장치
 const MAX_SCROLL_ITERATIONS = 400;
 // "다음화"를 계속 따라가다 무한 루프(예: 다음화 링크가 순환하는 경우)에
@@ -465,8 +468,8 @@ async function handleCaptureAllChapters(initialTab, options) {
 
       await navigateAndWaitForLoad(tabId, nextUrl);
       // 'complete' 상태 직후에도 페이지 자체의 초기화 스크립트(광고, 뷰어 초기화 등)가
-      // 아직 안 끝났을 수 있어 짧게 대기한다.
-      await new Promise((resolve) => setTimeout(resolve, 500));
+      // 아직 안 끝났을 수 있어 PAGE_CHANGE_WAIT_MS만큼 대기한다.
+      await new Promise((resolve) => setTimeout(resolve, PAGE_CHANGE_WAIT_MS));
       tab = await chrome.tabs.get(tabId);
     }
 
